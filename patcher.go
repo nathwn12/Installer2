@@ -29,13 +29,7 @@ func init() {
 		Log.Debug("Using UserConfig")
 		BaseDir = appdir.New("Vencord").UserConfig()
 	}
-
-	if dir := os.Getenv("VENCORD_ASAR_FILE"); dir != "" {
-		Log.Debug("Using VENCORD_ASAR_FILE")
-		VencordAsarPath = dir
-	} else {
-		VencordAsarPath = path.Join(BaseDir, "vencord.asar")
-	}
+	VencordAsarPath = path.Join(BaseDir, "vencord.asar")
 }
 
 type DiscordInstall struct {
