@@ -12,11 +12,13 @@ import (
 	"bytes"
 	_ "embed"
 	"errors"
-	g "github.com/AllenDang/giu"
-	"github.com/AllenDang/imgui-go"
 	"image"
 	"image/color"
 	"vencordinstaller/buildinfo"
+
+	g "github.com/AllenDang/giu"
+	"github.com/AllenDang/imgui-go"
+
 	// png decoder for icon
 	_ "image/png"
 	"os"
@@ -267,6 +269,21 @@ func makeAutoComplete() []any {
 func makeRadioOnChange(i int) func() {
 	return func() {
 		radioIdx = i
+	}
+}
+
+func renderFilesDirErr() g.Widget {
+	return g.Layout{
+		g.Dummy(0, 50),
+		g.Style().
+			SetColor(g.StyleColorText, DiscordRed).
+			SetFontSize(30).
+			To(
+				g.Align(g.AlignCenter).To(
+					g.Label("Error: Failed to create: "+FilesDirErr.Error()),
+					g.Label("Resolve this error, then restart me!"),
+				),
+			),
 	}
 }
 
@@ -633,7 +650,7 @@ func loop() {
 						SetStyle(g.StyleVarFramePadding, 4, 4).
 						To(
 							g.Button("Open Directory").OnClick(func() {
-								g.OpenURL("file://" + path.Dir(VencordDirectory))
+								g.OpenURL("file://" + FilesDir)
 							}),
 						),
 				),
@@ -656,7 +673,11 @@ func loop() {
 				},
 			),
 
-			renderInstaller(),
+			&CondWidget{
+				predicate:  FilesDirErr != nil,
+				ifWidget:   renderFilesDirErr,
+				elseWidget: renderInstaller,
+			},
 		)
 
 	g.PopStyle()
