@@ -184,7 +184,7 @@ func FindDiscords() []any {
 		if !ExistsFile(discordDir) {
 			continue
 		}
-		if discord := ParseDiscordNew(discordDir, name, false); discord != nil {
+		if discord := ParseDiscordNew(discordDir, name, true); discord != nil {
 			Log.Debug("Found Discord install at ", discordDir)
 			discords = append(discords, discord)
 		}
