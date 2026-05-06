@@ -129,7 +129,7 @@ func ParseDiscord(p, _ string) *DiscordInstall {
 		isSystemElectron = true
 		isPatched = ExistsFile(path.Join(p, "_app.asar.unpacked"))
 	} else {
-		Log.Warn("Tried to parse invalid Location:", p)
+		// Log.Warn("Tried to parse invalid Location:", p)
 		return nil
 	}
 
