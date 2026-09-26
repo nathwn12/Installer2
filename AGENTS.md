@@ -32,8 +32,11 @@ No test suite, no linter config, no pre-commit hooks. CI runs only on `v*` tag p
 - Runtime env overrides useful for testing: `VENCORD_DEV_INSTALL=1` (skip GitHub fetch), `VENCORD_USER_DATA_DIR`/`DISCORD_USER_DATA_DIR` (data dir), `--debug` flag for verbose logs.
 - Upstream release chain (FYI only): `v*` tag → build all platforms → **draft** release → manual publish → winget auto-submits `VencordInstallerCli.exe`. Don't tag casually.
 
-## Standing gaps (as of last session)
+## Standing state
 
-- `feat/vencord-main` branch: **not created yet** (repo is on `main`).
-- `upstream` remote: **not added yet** (only `origin` → nathwn12/Installer2).
-- The script: **not written yet**. `install.ps1` (upstream's bootstrap, downloads the CLI and runs it) exists as the pattern to build on.
+- `feat/vencord-main`: **live** — work happens here, merge `upstream/main` into it on every session start.
+- `upstream` remote: added (`https://github.com/Vencord/Installer`); fork base is exactly upstream's head as of 2026-09-26 (`fe6e041`) — future merges start clean.
+- The script: **`vencord-setup.ps1`** (repo root) — the fork's one owned delta. One-liner (tested, paramless auto-run):
+  `iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1'))`
+  Parameterized: `& ([scriptblock]::Create((iwr -UseBasicParsing '<url>').Content)) -DryRun -IncludeOpenAsar`. Set `VENCORD_SETUP_IMPORTED=1` to import without auto-run.
+- Verify the script with `-DryRun` (2 valid installs on the maintainer machine: none stable — the `Discord` dir has no `app-*` — and canary, already patched; canary is the real target).
