@@ -18,7 +18,7 @@ Fork of `Vencord/Installer` (upstream), hosted at `nathwn12/Installer2`. Work ha
 ## Maintenance rules (how we stay sane)
 
 1. **Upstream wins.** Never refactor, restyle, or "improve" upstream Go code. Every changed line outside the script (and this file) must trace to a merge conflict or a script-breaking upstream change.
-2. **Sync ritual, always before any work:** add upstream if missing (`git remote add upstream https://github.com/Vencord/Installer`), then `git fetch upstream`, then **merge** `upstream/main` into `feat/vencord-main` (pull/merge flow — never rebase the branch).
+2. **Sync ritual, always before any work:** add upstream if missing (`git remote add upstream https://github.com/Vencord/Installer`), then `git fetch upstream`, then **merge** `upstream/main` into `feat/vencord-main` (pull/merge flow — never rebase the branch). **This is also automated:** `.github/workflows/sync-upstream.yml` (hosted on `main` — GitHub only schedules from the default branch; it acts on `feat/vencord-main`) merges upstream every 6h, keeps the owned files untouched, verify-gates the push, and files a deduped **"Upstream sync failed"** issue on failure — a manual merge is only needed when that issue is open.
 3. **Conflict policy:** take upstream's side everywhere except the script, `AGENTS.md`, and `README.md` (owner-approved rewrite — upstream's README does not come back). In Go code, only override upstream if it breaks the script's interface (CLI flags, build output names).
 4. After every merge: `go build`, `go build -tags cli`, `go vet -tags cli ./...` — and a `-DryRun` test of the script. That's the whole verify story.
 
@@ -36,8 +36,9 @@ No test suite, no linter config, no pre-commit hooks. CI runs only on `v*` tag p
 
 ## Standing state
 
-- `feat/vencord-main`: **live** — work happens here, merge `upstream/main` into it on every session start.
+- `feat/vencord-main`: **live** — work happens here, merge `upstream/main` into it on every session start (also automated every 6h — see maintenance rules).
 - `upstream` remote: added (`https://github.com/Vencord/Installer`); fork base is exactly upstream's head as of 2026-09-26 (`fe6e041`) — future merges start clean.
+- `main` hosts exactly one exception to the pure-mirror rule: the sync machinery (`.github/workflows/sync-upstream.yml` + `.github/sync-upstream.sh`) — mechanical necessity, cron only schedules from the default branch. The workflow itself acts on `feat/vencord-main`, never on `main`.
 - The script: **`vencord-setup.ps1`** (repo root) — the fork's one owned delta. One-liner (paramless auto-run; **must stay pure ASCII, no BOM** — a BOM breaks `irm`/`scriptblock` parsing over HTTP):
   `iex (irm 'https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1')`
   Parameterized: `& ([scriptblock]::Create((irm '<url>'))) -DryRun -IncludeOpenAsar`. Set `VENCORD_SETUP_IMPORTED=1` to import without auto-run. After pushing script changes, raw.githubusercontent may serve the old blob for ~5 min (edge cache) — don't judge a fresh one-liner by an immediate self-fetch.
