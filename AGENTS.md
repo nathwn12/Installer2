@@ -2,7 +2,7 @@
 
 ## What this fork is — read this first
 
-Fork of `Vencord/Installer` (upstream), hosted at `nathwn12/Installer2`. Work happens on branch `feat/vencord-main` (create from `main` if it doesn't exist yet).
+Fork of `Vencord/Installer` (upstream), hosted at `nathwn12/Installer2`. Work happens on branch `feat/vencord-main` (create from `main` if it doesn't exist yet). This fork is a **thin proxy**: upstream is the product and does the real work — we add one automation script and nothing else. `main` mirrors upstream; `feat/vencord-main` carries the delta on top of it.
 
 **The only owned delta is one PowerShell script** (root-level `.ps1`). Everything else must stay merge-clean with upstream:
 
