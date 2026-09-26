@@ -12,11 +12,11 @@
     Admin rights are NOT required (everything happens under %LOCALAPPDATA%).
     Requires Windows PowerShell 5.1 or newer (works on pwsh too).
 
-.USAGE - exact tested one-liner (runs with zero parameters: auto-detect, install/repair Vencord, no OpenAsar):
-    iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1'))
+.USAGE - one-liner (runs with zero parameters: auto-detect, install/repair Vencord, no OpenAsar):
+    iex (irm 'https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1')
 
-.USAGE - parameterized form:
-    & ([scriptblock]::Create((iwr -UseBasicParsing 'https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1').Content)) -DryRun -IncludeOpenAsar
+.USAGE - parameterized form (dry-run / OpenAsar opt-in):
+    & ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1'))) -DryRun -IncludeOpenAsar
 
 .PARAMETERS
     -DryRun           Print the plan (installs, patched state, exact CLI commands) and touch nothing.
