@@ -27,6 +27,7 @@
 
 .NOTES
     Exit codes: 0 success (and dry-run, even when nothing is found) - 1 install failure - 2 usage/detection error.
+    Every install is verified on disk after the engine runs (original asar renamed + stub in place); transient failures (Discord file lock) are retried up to twice, re-closing Discord first; deterministic failures end immediately.
     If Discord is running the script closes it automatically (graceful close first, then force-kill), so the patcher never hits errno 32.
 #>
 param(
@@ -107,6 +108,43 @@ function Invoke-VencordSetup {
         $code = $LASTEXITCODE
         $ErrorActionPreference = $prevEap
         return [pscustomobject]@{ ExitCode = $code; Output = $lines }
+    }
+
+    # Verify the patch actually landed on disk: original asar renamed away (_app.asar)
+    # and a small stub app.asar in its place. Mirrors the state patchAppAsar leaves behind.
+    function Test-PatchApplied($t) {
+        $res = Join-Path $t.AppDir 'resources'
+        if (-not (Test-Path -LiteralPath (Join-Path $res '_app.asar') -PathType Leaf)) { return $false }
+        $stub = Get-Item -LiteralPath (Join-Path $res 'app.asar') -ErrorAction SilentlyContinue
+        if ($null -eq $stub) { return $false }
+        return ($stub.Length -lt 64KB)
+    }
+
+    # Close running Discord: graceful (CloseMainWindow) first, force-kill leftovers.
+    # Polls every 250ms instead of fixed sleeps - exits as soon as Discord is gone,
+    # with hard ceilings (3s graceful / 2s after force) so the worst case is unchanged.
+    function Close-DiscordProcesses {
+        $procs = @(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue)
+        if ($procs.Count -eq 0) { return }
+        foreach ($p in $procs) { [void]$p.CloseMainWindow() }
+        $deadline = [DateTime]::UtcNow.AddSeconds(3)
+        while ([DateTime]::UtcNow -lt $deadline) {
+            if (@(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue).Count -eq 0) { break }
+            Start-Sleep -Milliseconds 250
+        }
+        $left = @(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue)
+        foreach ($p in $left) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+        $deadline = [DateTime]::UtcNow.AddSeconds(2)
+        while ([DateTime]::UtcNow -lt $deadline) {
+            if (@(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue).Count -eq 0) { break }
+            Start-Sleep -Milliseconds 250
+        }
+        if (@(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue).Count -gt 0) {
+            Write-Host 'WARNING: could not close all Discord processes - the patcher may fail with errno 32.'
+        }
+        else {
+            Write-Host 'Discord closed.'
+        }
     }
 
     try {
@@ -202,22 +240,9 @@ function Invoke-VencordSetup {
                 Write-Host ("Discord running check: RUNNING ({0}) - the script will close it automatically before patching (graceful close, then force-kill)" -f $names)
             }
             else {
-                # Auto-close: graceful first (CloseMainWindow), then force-kill leftovers.
+                # Auto-close: graceful first, then force-kill leftovers.
                 Write-Host ("Closing Discord ({0}) to avoid file locks (errno 32)..." -f $names)
-                foreach ($p in $procs) { [void]$p.CloseMainWindow() }
-                Start-Sleep -Seconds 3
-                $left = @(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue)
-                if ($left.Count -gt 0) {
-                    foreach ($p in $left) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
-                    Start-Sleep -Seconds 2
-                }
-                $still = @(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue)
-                if ($still.Count -gt 0) {
-                    Write-Host 'WARNING: could not close all Discord processes - the patcher may fail with errno 32.'
-                }
-                else {
-                    Write-Host 'Discord closed.'
-                }
+                Close-DiscordProcesses
             }
         }
         else {
@@ -296,14 +321,39 @@ function Invoke-VencordSetup {
 
             $verb = 'install'
             if ($t.Patched) { $verb = 'repair' }
-            Write-Host ("  Running: {0}" -f (Format-CliCommand $cliPath $cliActions[$t.Path]))
-            $r = Invoke-Cli -ExePath $cliPath -ExeArgs $cliActions[$t.Path]
-            if ($r.ExitCode -eq 0) {
-                $okCount++
-            }
-            else {
-                Write-Host ("  FAILED: VencordInstallerCli.exe {0} exited with code {1}." -f $verb, $r.ExitCode)
-                $failures += ("{0} ({1})" -f $t.Branch, $t.Path)
+            $maxAttempts = 3   # initial run + up to 2 retries
+            $done = $false
+            for ($a = 1; $a -le $maxAttempts -and -not $done; $a++) {
+                if ($a -gt 1) {
+                    Write-Host ("  Retry {0}/{1} - closing Discord first..." -f ($a - 1), ($maxAttempts - 1))
+                    Close-DiscordProcesses
+                }
+                Write-Host ("  Running: {0}" -f (Format-CliCommand $cliPath $cliActions[$t.Path]))
+                $r = Invoke-Cli -ExePath $cliPath -ExeArgs $cliActions[$t.Path]
+                if ($r.ExitCode -ne 0) {
+                    # Retry only transient failures: files locked by a running Discord.
+                    # Network/rate-limit failures are deterministic - retrying is noise.
+                    $transient = (@($r.Output | Where-Object { $_ -match 'used by a different process|sharing violation' }).Count -gt 0)
+                    if (-not $transient -or $a -ge $maxAttempts) {
+                        Write-Host ("  FAILED: VencordInstallerCli.exe {0} exited with code {1}." -f $verb, $r.ExitCode)
+                        $failures += ("{0} ({1})" -f $t.Branch, $t.Path)
+                        break
+                    }
+                    continue
+                }
+                # Engine exited 0 - verify the patch actually landed on disk.
+                if (Test-PatchApplied $t) {
+                    Write-Host '  Verified: patch is on disk.'
+                    $okCount++
+                    $done = $true
+                }
+                elseif ($a -lt $maxAttempts) {
+                    Write-Host ("  Verify failed - retrying (up to {0} retries)..." -f ($maxAttempts - 1))
+                }
+                else {
+                    Write-Host '  FAILED: the engine reported success but the patch did not verify on disk.'
+                    $failures += ("{0} ({1})" -f $t.Branch, $t.Path)
+                }
             }
 
             if ($wantOpenAsar) {
