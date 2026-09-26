@@ -18,7 +18,7 @@ Fork of `Vencord/Installer` (upstream), hosted at `nathwn12/Installer2`. Work ha
 
 1. **Upstream wins.** Never refactor, restyle, or "improve" upstream Go code. Every changed line outside the script (and this file) must trace to a merge conflict or a script-breaking upstream change.
 2. **Sync ritual, always before any work:** add upstream if missing (`git remote add upstream https://github.com/Vencord/Installer`), then `git fetch upstream`, then **merge** `upstream/main` into `feat/vencord-main` (pull/merge flow — never rebase the branch).
-3. **Conflict policy:** take upstream's side everywhere except the script/AGENTS.md. In Go code, only override upstream if it breaks the script's interface (CLI flags, build output names).
+3. **Conflict policy:** take upstream's side everywhere except the script, `AGENTS.md`, and `README.md` (owner-approved rewrite — upstream's README does not come back). In Go code, only override upstream if it breaks the script's interface (CLI flags, build output names).
 4. After every merge: `go build`, `go build -tags cli`, `go vet -tags cli ./...` — and a `-DryRun` test of the script. That's the whole verify story.
 
 ## Verify changes (no tests exist)
