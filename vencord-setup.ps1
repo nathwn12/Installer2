@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     vencord-setup.ps1 - auto-detects Discord installs and installs/repairs Vencord on them.
 
