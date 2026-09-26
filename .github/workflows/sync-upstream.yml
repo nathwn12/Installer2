@@ -1,0 +1,118 @@
+# Automated upstream sync for the fork (nathwn12/Installer2).
+#
+# Policy: AGENTS.md maintenance rules — merge upstream/main into
+# feat/vencord-main every 6h; conflict resolution + owned-file preservation is
+# done by .github/sync-upstream.sh; verify the build; push only when a merge
+# actually happened; the one-liner script is always smoke-tested so a merge can
+# never break the user-facing entry point.
+#
+# NOTE: GitHub only fires `schedule` on the default branch. Until this file
+# lands on `main`, use workflow_dispatch; the cron starts once it merges.
+#
+# Failures dedupe into one "Upstream sync failed" issue (notify-failure job).
+
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: feat/vencord-main
+          fetch-depth: 0
+
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge upstream
+        id: merge
+        run: bash .github/sync-upstream.sh
+
+      - name: Verify build
+        if: steps.merge.outputs.merged == 'true'
+        run: |
+          go build -tags cli ./...
+          go vet -tags cli ./...
+
+      - name: Push
+        if: steps.merge.outputs.merged == 'true'
+        run: git push origin feat/vencord-main
+
+  # Not gated on `sync`: runs before, after, or while sync runs, and on every
+  # trigger, so a broken one-liner is caught even when the merge is green.
+  script-smoke:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: feat/vencord-main
+
+      - name: Dry-run smoke test
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File vencord-setup.ps1 -DryRun > "$env:RUNNER_TEMP\smoke-output.txt" 2>&1
+          $code = $LASTEXITCODE
+          Write-Host (Get-Content "$env:RUNNER_TEMP\smoke-output.txt" -Raw)
+          if ($code -ne 0) {
+            Write-Host "::error::vencord-setup.ps1 -DryRun exited $code (expected 0)"
+            exit 1
+          }
+          if (-not (Select-String -Path "$env:RUNNER_TEMP\smoke-output.txt" -Pattern 'Nothing to do\.' -Quiet)) {
+            Write-Host "::error::expected 'Nothing to do.' output (no Discord on the runner), got the output above"
+            exit 1
+          }
+
+  # Needs-chained failure report: runs when either job above failed.
+  notify-failure:
+    runs-on: ubuntu-latest
+    needs: [sync, script-smoke]
+    if: failure()
+
+    steps:
+      - name: Dedupe and file failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          failing_step="unknown"
+          view="$(gh run view "$GITHUB_RUN_ID" --json jobs 2>/dev/null || true)"
+          if [ -n "$view" ]; then
+            found="$(printf '%s' "$view" | jq -r '[.jobs[] | select(.conclusion == "failure") | .steps[]? | select(.conclusion == "failure") | .name] | first // empty')"
+            if [ -n "$found" ]; then
+              failing_step="$found"
+            fi
+          fi
+
+          body="$(printf 'Automated upstream sync failed.\n\n- Run: %s\n- Failing step: %s\n- Resolution policy: AGENTS.md maintenance rules\n' "$run_url" "$failing_step")"
+
+          existing="$(gh issue list --search '"Upstream sync failed" in:title' --state open --json url --limit 1 2>/dev/null || true)"
+          issue_url="$(printf '%s' "$existing" | jq -r '.[0].url // empty')"
+          if [ -n "$issue_url" ]; then
+            gh issue comment "$issue_url" --body "$body"
+            echo "commented on existing failure issue: $issue_url"
+          else
+            gh issue create --title "Upstream sync failed" --body "$body"
+          fi
