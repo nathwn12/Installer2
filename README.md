@@ -1,66 +1,43 @@
-# Vencord Installer
+# Vencord Setup
 
-The Vencord Installer allows you to install [Vencord, the cutest Discord Desktop client mod](https://github.com/Vendicated/Vencord)
+One line. Your Discord is detected automatically — Vencord gets installed or repaired. Done.
 
-![image](https://user-images.githubusercontent.com/45497981/226734476-5fb42420-844d-4e27-ae06-4799118e086e.png)
+> Windows + PowerShell 5.1+ · no admin needed · you don't even need to close Discord — the script closes it for you.
 
-## Usage
+## Install (Vencord only)
 
-See https://vencord.dev/download
-
-## Building from source
-
-### Prerequisites 
-
-You need to install the [Go programming language](https://go.dev/doc/install) and GCC, the GNU Compiler Collection (MinGW on Windows)
-
-<details>
-<summary>Additionally, if you're using Linux, you have to install some additional dependencies:</summary>
-
-#### Base dependencies
-```sh
-apt install -y pkg-config libsdl2-dev libglx-dev libgl1-mesa-dev
-dnf install pkg-config libGL-devel libXxf86vm-devel
+```powershell
+iex (irm 'https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1')
 ```
 
-#### X11 dependencies
-```sh
-apt install -y xorg-dev
-dnf install libXcursor-devel libXi-devel libXinerama-devel libXrandr-devel
+## Install (Vencord + OpenAsar)
+
+```powershell
+& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1'))) -IncludeOpenAsar
 ```
 
-#### Wayland dependencies
-```sh
-apt install -y libwayland-dev libxkbcommon-dev wayland-protocols extra-cmake-modules
-dnf install wayland-devel libxkbcommon-devel wayland-protocols-devel extra-cmake-modules
-```
+Optional preview without touching anything — add `-DryRun` to the second form.
 
-</details>
+## What you get
 
-### Building
+- ✅ **One line, zero clicks** — paste, Enter, done. That's the whole install.
+- ✅ **Auto-detect** — finds your Discord (stable / PTB / Canary / Development) under `%LOCALAPPDATA%` and points itself at it.
+- ✅ **Auto install *or* repair** — already patched? It repairs. Fresh? It installs. No menus, no prompts.
+- ✅ **Discord open? Doesn't matter** — the script closes it for you (gracefully; force-kill only as a fallback).
+- ✅ **Always current** — pulls the official Vencord build at run time, so it never goes stale.
+- ✅ **OpenAsar opt-in** — off by default; one flag to include, one to exclude.
+- ✅ **Safe to re-run** — idempotent: run it again anytime to repair or refresh.
 
-#### Install dependencies
+Powered by the official **Vencord Installer** engine — this script just drives it so you don't have to think.
 
-```sh
-go mod tidy
-```
+---
 
-#### Build the GUI
+## Credits & license — all credit to the original owners
 
-##### Windows / Mac / Linux X11
-```sh
-make GUI=1
-```
+**This fork takes no credit and makes no money. It exists purely for personal use.**
 
-##### Linux Wayland
-```sh
-make GUI=1 WAYLAND=1
-```
+- **Vencord** — by **Vendicated** and contributors: <https://github.com/Vendicated/Vencord>
+- **Vencord Installer** — the engine this script drives, by **Vendicated** and contributors: <https://github.com/Vencord/Installer>
+- Vencord, its installer, and this fork are licensed under the **GNU GPL v3** — see [LICENSE](LICENSE).
 
-#### Build the CLI
-```sh
-make
-```
-
-You might want to pass some flags to this command to get a better build.
-See [the GitHub workflow](https://github.com/Vendicated/VencordInstaller/blob/main/.github/workflows/release.yml) for what flags I pass or if you want more precise instructions
+All rights, credit, and ownership belong to the original authors. This repository is a personal-use fork: no affiliation, no endorsement, no monetary gain, nothing sold or charged. Everything of value here is theirs — the only addition is one convenience script.
