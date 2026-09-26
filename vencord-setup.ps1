@@ -27,7 +27,7 @@
 
 .NOTES
     Exit codes: 0 success (and dry-run, even when nothing is found) - 1 install failure - 2 usage/detection error.
-    If Discord is running you get a warning; the script continues (the CLI fails cleanly with errno 32).
+    If Discord is running the script closes it automatically (graceful close first, then force-kill), so the patcher never hits errno 32.
 #>
 param(
     [switch]$DryRun,
@@ -199,12 +199,25 @@ function Invoke-VencordSetup {
         if ($procs.Count -gt 0) {
             $names = (@($procs | Select-Object -ExpandProperty ProcessName -Unique) -join ', ')
             if ($DryRun) {
-                Write-Host ("Discord running check: RUNNING ({0}) - patching a running install fails (errno 32); close Discord first" -f $names)
+                Write-Host ("Discord running check: RUNNING ({0}) - the script will close it automatically before patching (graceful close, then force-kill)" -f $names)
             }
             else {
-                Write-Host ("WARNING: Discord appears to be running ({0})." -f $names)
-                Write-Host '         The patcher may fail with a sharing violation (errno 32) - close Discord and re-run.'
-                Write-Host '         Continuing anyway; the installer reports the failure cleanly.'
+                # Auto-close: graceful first (CloseMainWindow), then force-kill leftovers.
+                Write-Host ("Closing Discord ({0}) to avoid file locks (errno 32)..." -f $names)
+                foreach ($p in $procs) { [void]$p.CloseMainWindow() }
+                Start-Sleep -Seconds 3
+                $left = @(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue)
+                if ($left.Count -gt 0) {
+                    foreach ($p in $left) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+                    Start-Sleep -Seconds 2
+                }
+                $still = @(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue)
+                if ($still.Count -gt 0) {
+                    Write-Host 'WARNING: could not close all Discord processes - the patcher may fail with errno 32.'
+                }
+                else {
+                    Write-Host 'Discord closed.'
+                }
             }
         }
         else {
