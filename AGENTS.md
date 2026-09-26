@@ -11,7 +11,8 @@ Fork of `Vencord/Installer` (upstream), hosted at `nathwn12/Installer2`. Work ha
 - OpenAsar is opt-in: include/exclude subcommand or flag. Default OFF.
 - `--dry-run`: print the plan (target path, branch, actions) and touch nothing.
 - Callable as a one-liner via `iex`. Constraint you must design around: `iex (iwr <url>)` executes text with **no arguments** — the script must auto-run correctly with zero params, and expose its params for `& ([scriptblock]::Create((iwr <url>))) -DryRun -IncludeOpenAsar` style invocation.
-- Implementation: do **not** reimplement patching in PowerShell. Download the released `VencordInstallerCli.exe` (the existing `install.ps1` shows the pattern) and drive it with its flags (`--install`, `--repair`, `--install-openasar`, `--branch`, `--location`). The Go side is the engine; the script is the driver. Warn or abort if Discord is running (Windows sharing violation, errno 32).
+- Auto-closes Discord before patching (graceful `CloseMainWindow`, then force-kill leftovers). Dry-run never kills anything.
+- Implementation: do **not** reimplement patching in PowerShell. Download the released `VencordInstallerCli.exe` (the existing `install.ps1` shows the pattern) and drive it with its flags (`--install`, `--repair`, `--install-openasar`, `--branch`, `--location`). The Go side is the engine; the script is the driver. errno 32 (sharing violation) means a Discord process is still open.
 
 ## Maintenance rules (how we stay sane)
 
