@@ -3,13 +3,13 @@
 ## Apply
 
 - Command: `& ([scriptblock]::Create((Get-Content -Raw .\vencord-setup.ps1)))` (repo root, `feat/vencord-main` @ `59be263`), run under `powershell.exe -NoProfile`.
-- Script detected canary (`<user-profile>\AppData\Local\DiscordCanary`), found it already patched → engine `--repair`. Discord was closed at run time (auto-close feature added same session: graceful `CloseMainWindow`, then force-kill — not exercised here because Discord was already closed).
+- Script detected canary (`%USERPROFILE%\AppData\Local\DiscordCanary`), found it already patched → engine `--repair`. Discord was closed at run time (auto-close feature added same session: graceful `CloseMainWindow`, then force-kill — not exercised here because Discord was already closed).
 - Engine downloaded latest Vencord build, unpatched the existing patch, re-patched. Engine exit 0, script exit 0.
 
 ## Verify
 
 - `%LOCALAPPDATA%\DiscordCanary\app-1.0.1192\resources\`: `_app.asar` (41,443 B — original), `app.asar` (220 B — stub), `app.asar.backup` (3.6 MB, written by upstream CLI).
-- Stub `app.asar` decodes to `require("<user-profile>\AppData\Roaming\Vencord\dist\patcher.js")` + package.json.
+- Stub `app.asar` decodes to `require("%USERPROFILE%\AppData\Roaming\Vencord\dist\patcher.js")` + package.json.
 - Payload present at `%APPDATA%\Vencord\dist\`: patcher.js, preload.js, renderer.js (+maps, LEGAL files).
 
 ## Revert
