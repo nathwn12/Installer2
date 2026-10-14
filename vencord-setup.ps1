@@ -12,6 +12,13 @@
     Admin rights are NOT required (everything happens under %LOCALAPPDATA%).
     Requires Windows PowerShell 5.1 or newer (works on pwsh too).
 
+    After an all-success run the script launches the Discord install(s) it just set up,
+    using the install's own updater (Update.exe --processStart <Discord*.exe>, the
+    canonical shortcut target) so it is agnostic to the branch (stable / PTB / canary /
+    development); the executable name is resolved FROM THE INSTALL, never from a branch
+    table. A launch failure prints a WARNING and never changes the exit code; -NoLaunch
+    suppresses the launch entirely, and a dry run or a failed run never launches.
+
 .USAGE - one-liner (runs with zero parameters: auto-detect, install/repair Vencord, no OpenAsar):
     iex (irm 'https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1')
 
@@ -24,6 +31,7 @@
     -ExcludeOpenAsar  Explicit no-OpenAsar; identical to the default, exists for explicitness.
     -Branch <b>       Narrow targeting to one branch: stable | ptb | canary | development (alias: dev).
     -Location <path>  Narrow targeting to one Discord install base directory (e.g. %LOCALAPPDATA%\Discord).
+    -NoLaunch         Do not launch the Discord install(s) after a successful run (default: launch them).
 
 .NOTES
     Exit codes: 0 success (and dry-run, even when nothing is found) - 1 install failure - 2 usage/detection error.
@@ -35,7 +43,8 @@ param(
     [switch]$IncludeOpenAsar,
     [switch]$ExcludeOpenAsar,
     [string]$Branch = '',
-    [string]$Location = ''
+    [string]$Location = '',
+    [switch]$NoLaunch
 )
 
 function Invoke-VencordSetup {
@@ -44,7 +53,8 @@ function Invoke-VencordSetup {
         [switch]$IncludeOpenAsar,
         [switch]$ExcludeOpenAsar,
         [string]$Branch = '',
-        [string]$Location = ''
+        [string]$Location = '',
+        [switch]$NoLaunch
     )
 
     $ErrorActionPreference = 'Stop'
@@ -144,6 +154,49 @@ function Invoke-VencordSetup {
         }
         else {
             Write-Host 'Discord closed.'
+        }
+    }
+
+    # Resolve the Discord client executable FROM THE INSTALL (the app-* dir is the truth
+    # for which exe this install runs), never from a hardcoded branch table. The updater
+    # launcher is never a client; a known branch is the last-resort fallback so a missing
+    # or renamed exe still resolves; otherwise the caller is told, it is not guessed.
+    function Get-DiscordExeName($t) {
+        $candidates = @(Get-ChildItem -LiteralPath $t.AppDir -Filter '*.exe' -File -ErrorAction SilentlyContinue)
+        foreach ($c in $candidates) {
+            if ($c.Name -eq 'updater_launcher.exe') { continue }
+            if ($c.Name -like 'Discord*.exe') { return $c.Name }
+        }
+        if ($branchFolders.ContainsKey($t.Branch)) { return ($branchFolders[$t.Branch] + '.exe') }
+        return $null
+    }
+
+    # Launch one install we just patched: through the install's own updater when present
+    # (Update.exe --processStart <exe>, the canonical branch-agnostic shortcut target),
+    # directly from the app dir otherwise. A launch failure is a WARNING, never fatal -
+    # it must not change the run's exit code. Returns $true when a launch was issued.
+    function Start-DiscordTarget($t) {
+        $exeName = Get-DiscordExeName $t
+        if (-not $exeName) {
+            Write-Host ('WARNING: could not find a Discord executable in {0} - not launched.' -f $t.AppDir)
+            return $false
+        }
+        try {
+            $updater = Join-Path $t.Path 'Update.exe'
+            if (Test-Path -LiteralPath $updater -PathType Leaf) {
+                Start-Process -FilePath $updater -ArgumentList @('--processStart', $exeName) -WorkingDirectory $t.Path
+                Write-Host ('Launched {0}: "{1}" --processStart {2}' -f $t.Branch, $updater, $exeName)
+            }
+            else {
+                $exePath = Join-Path $t.AppDir $exeName
+                Start-Process -FilePath $exePath -WorkingDirectory $t.AppDir
+                Write-Host ('Launched {0}: "{1}"' -f $t.Branch, $exePath)
+            }
+            return $true
+        }
+        catch {
+            Write-Host ('WARNING: could not launch {0}: {1}' -f $t.Branch, $_.Exception.Message)
+            return $false
         }
     }
 
@@ -283,6 +336,24 @@ function Invoke-VencordSetup {
                     }
                     Write-Host ("  would run: {0}" -f (Format-CliCommand $cliPath $oaArgs))
                 }
+                if ($NoLaunch) {
+                    Write-Host '  Launch skipped (-NoLaunch)'
+                }
+                else {
+                    $exeName = Get-DiscordExeName $t
+                    if ($exeName) {
+                        $updater = Join-Path $t.Path 'Update.exe'
+                        if (Test-Path -LiteralPath $updater -PathType Leaf) {
+                            Write-Host ('  would launch: "{0}" --processStart {1}  (from {2})' -f $updater, $exeName, $t.Path)
+                        }
+                        else {
+                            Write-Host ('  would launch: "{0}"  (from {1})' -f (Join-Path $t.AppDir $exeName), $t.Path)
+                        }
+                    }
+                    else {
+                        Write-Host ('  WARNING: could not find a Discord executable in {0} - would not launch.' -f $t.AppDir)
+                    }
+                }
             }
             Write-Host ''
             Write-Host 'Dry run complete - nothing was downloaded, executed, or modified.'
@@ -393,7 +464,24 @@ function Invoke-VencordSetup {
             Write-Host 'Close Discord if it is running, then re-run this script to retry.'
             exit 1
         }
-        Write-Host 'Vencord is set up. Restart Discord to load it.'
+        Write-Host 'Vencord is set up.'
+        # Every install verified on disk (we only get here when nothing failed), so launch
+        # once per target. A launch failure is reported above and never changes this exit code.
+        if ($NoLaunch) {
+            Write-Host 'Launch skipped (-NoLaunch). Restart Discord to load it.'
+        }
+        else {
+            $launched = 0
+            foreach ($t in $targets) {
+                if ((Test-PatchApplied $t) -and (Start-DiscordTarget $t)) { $launched++ }
+            }
+            if ($launched -gt 0) {
+                Write-Host ("Launched {0} Discord install(s) - Discord is starting with Vencord loaded." -f $launched)
+            }
+            else {
+                Write-Host 'Restart Discord to load it.'
+            }
+        }
     }
     catch {
         Write-Host ("ERROR: {0}" -f $_.Exception.Message)
