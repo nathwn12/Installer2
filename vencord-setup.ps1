@@ -184,7 +184,7 @@ function Invoke-VencordSetup {
         try {
             $updater = Join-Path $t.Path 'Update.exe'
             if (Test-Path -LiteralPath $updater -PathType Leaf) {
-                Start-Process -FilePath $updater -ArgumentList @('--processStart', $exeName) -WorkingDirectory $t.Path
+                Start-Process -FilePath $updater -ArgumentList ('--processStart "{0}"' -f $exeName) -WorkingDirectory $t.Path
                 Write-Host ('Launched {0}: "{1}" --processStart {2}' -f $t.Branch, $updater, $exeName)
             }
             else {
