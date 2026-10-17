@@ -1,0 +1,38 @@
+# Smoke test for the one-liner script (nathwn12/Installer2).
+#
+# Ported verbatim from the `script-smoke` job of the retired
+# `.github/workflows/sync-upstream.yml`: dry-runs vencord-setup.ps1 on
+# windows-latest so a broken user-facing entry point is caught on push.
+# Runs standalone — no merge context, no schedule.
+
+name: Script smoke
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  script-smoke:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Dry-run smoke test
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File vencord-setup.ps1 -DryRun > "$env:RUNNER_TEMP\smoke-output.txt" 2>&1
+          $code = $LASTEXITCODE
+          Write-Host (Get-Content "$env:RUNNER_TEMP\smoke-output.txt" -Raw)
+          if ($code -ne 0) {
+            Write-Host "::error::vencord-setup.ps1 -DryRun exited $code (expected 0)"
+            exit 1
+          }
+          if (-not (Select-String -Path "$env:RUNNER_TEMP\smoke-output.txt" -Pattern 'Nothing to do\.' -Quiet)) {
+            Write-Host "::error::expected 'Nothing to do.' output (no Discord on the runner), got the output above"
+            exit 1
+          }

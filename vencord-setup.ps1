@@ -1,0 +1,496 @@
+<#
+.SYNOPSIS
+    vencord-setup.ps1 - auto-detects Discord installs and installs/repairs Vencord on them.
+
+.DESCRIPTION
+    The one owned delta of the Installer2 fork. Detects existing Discord installs
+    (stable / PTB / Canary / Development) under %LOCALAPPDATA%, then downloads the
+    released VencordInstallerCli.exe once and drives it with its own flags
+    (--install / --repair / --install-openasar / --location / --branch).
+    Patching is NOT reimplemented here; the Go CLI is the engine, this script is the driver.
+
+    Admin rights are NOT required (everything happens under %LOCALAPPDATA%).
+    Requires Windows PowerShell 5.1 or newer (works on pwsh too).
+
+    After an all-success run the script launches the Discord install(s) it just set up,
+    using the install's own updater (Update.exe --processStart <Discord*.exe>, the
+    canonical shortcut target) so it is agnostic to the branch (stable / PTB / canary /
+    development); the executable name is resolved FROM THE INSTALL, never from a branch
+    table. A launch failure prints a WARNING and never changes the exit code; -NoLaunch
+    suppresses the launch entirely, and a dry run or a failed run never launches.
+
+.USAGE - one-liner (runs with zero parameters: auto-detect, install/repair Vencord, no OpenAsar):
+    iex (irm 'https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1')
+
+.USAGE - parameterized form (dry-run / OpenAsar opt-in):
+    & ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1'))) -DryRun -IncludeOpenAsar
+
+.PARAMETERS
+    -DryRun           Print the plan (installs, patched state, exact CLI commands) and touch nothing.
+    -IncludeOpenAsar  Also install OpenAsar on each detected install (default OFF).
+    -ExcludeOpenAsar  Explicit no-OpenAsar; identical to the default, exists for explicitness.
+    -Branch <b>       Narrow targeting to one branch: stable | ptb | canary | development (alias: dev).
+    -Location <path>  Narrow targeting to one Discord install base directory (e.g. %LOCALAPPDATA%\Discord).
+    -NoLaunch         Do not launch the Discord install(s) after a successful run (default: launch them).
+
+.NOTES
+    Exit codes: 0 success (and dry-run, even when nothing is found) - 1 install failure - 2 usage/detection error.
+    Every install is verified on disk after the engine runs (original asar renamed + stub in place); transient failures (Discord file lock) are retried up to twice, re-closing Discord first; deterministic failures end immediately.
+    If Discord is running the script closes it automatically (graceful close first, then force-kill), so the patcher never hits errno 32.
+#>
+param(
+    [switch]$DryRun,
+    [switch]$IncludeOpenAsar,
+    [switch]$ExcludeOpenAsar,
+    [string]$Branch = '',
+    [string]$Location = '',
+    [switch]$NoLaunch
+)
+
+function Invoke-VencordSetup {
+    param(
+        [switch]$DryRun,
+        [switch]$IncludeOpenAsar,
+        [switch]$ExcludeOpenAsar,
+        [string]$Branch = '',
+        [string]$Location = '',
+        [switch]$NoLaunch
+    )
+
+    $ErrorActionPreference = 'Stop'
+
+    $cliUrl = 'https://github.com/Vencord/Installer/releases/latest/download/VencordInstallerCli.exe'
+    $cliPath = Join-Path ([System.IO.Path]::GetTempPath()) 'VencordInstallerCli.exe'
+
+    # branch display name -> folder name under %LOCALAPPDATA% (mirrors find_discord_windows.go windowsNames)
+    $branchFolders = @{
+        stable      = 'Discord'
+        ptb         = 'DiscordPTB'
+        canary      = 'DiscordCanary'
+        development = 'DiscordDevelopment'
+    }
+    $validBranches = @('stable', 'ptb', 'canary', 'development', 'dev')
+
+    function Format-CliCommand([string]$ExePath, [string[]]$ExeArgs) {
+        $parts = @('"' + $ExePath + '"')
+        foreach ($a in $ExeArgs) {
+            if ($a -match '\s') { $parts += '"' + $a + '"' } else { $parts += $a }
+        }
+        return ($parts -join ' ')
+    }
+
+    # Mirrors ParseDiscord in find_discord_windows.go: among app-* dirs, pick the
+    # highest (same ordinal string ordering the Go code uses), require resources\app.asar,
+    # patched = resources\_app.asar exists.
+    function Get-DiscordInstall([string]$BasePath, [string]$BranchName) {
+        if (-not (Test-Path -LiteralPath $BasePath -PathType Container)) { return $null }
+        $bestName = $null
+        $bestDir = $null
+        foreach ($d in (Get-ChildItem -LiteralPath $BasePath -Directory -Filter 'app-*')) {
+            $resources = Join-Path $d.FullName 'resources'
+            if (-not (Test-Path -LiteralPath (Join-Path $resources 'app.asar') -PathType Leaf)) { continue }
+            if ($null -eq $bestName -or [string]::CompareOrdinal($d.FullName, $bestName) -gt 0) {
+                $bestName = $d.FullName
+                $bestDir = $d
+            }
+        }
+        if ($null -eq $bestDir) { return $null }
+        $patched = Test-Path -LiteralPath (Join-Path (Join-Path $bestDir.FullName 'resources') '_app.asar') -PathType Leaf
+        return [pscustomobject]@{
+            Branch  = $BranchName
+            Path    = $BasePath
+            AppDir  = $bestDir.FullName
+            Patched = $patched
+        }
+    }
+
+    function Invoke-Cli([string]$ExePath, [string[]]$ExeArgs) {
+        # 'Continue' here: native stderr merged via 2>&1 must not become a terminating
+        # error under the outer 'Stop' preference; lines are surfaced as text below.
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $lines = New-Object System.Collections.Generic.List[string]
+        & $ExePath @ExeArgs 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) { $line = $_.ToString() } else { $line = [string]$_ }
+            Write-Host ('  ' + $line)
+            [void]$lines.Add($line)
+        }
+        $code = $LASTEXITCODE
+        $ErrorActionPreference = $prevEap
+        return [pscustomobject]@{ ExitCode = $code; Output = $lines }
+    }
+
+    # Verify the patch actually landed on disk: original asar renamed away (_app.asar)
+    # and a small stub app.asar in its place. Mirrors the state patchAppAsar leaves behind.
+    function Test-PatchApplied($t) {
+        $res = Join-Path $t.AppDir 'resources'
+        if (-not (Test-Path -LiteralPath (Join-Path $res '_app.asar') -PathType Leaf)) { return $false }
+        $stub = Get-Item -LiteralPath (Join-Path $res 'app.asar') -ErrorAction SilentlyContinue
+        if ($null -eq $stub) { return $false }
+        return ($stub.Length -lt 64KB)
+    }
+
+    # Close running Discord: graceful (CloseMainWindow) first, force-kill leftovers.
+    # Polls every 250ms instead of fixed sleeps - exits as soon as Discord is gone,
+    # with hard ceilings (3s graceful / 2s after force) so the worst case is unchanged.
+    function Close-DiscordProcesses {
+        $procs = @(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue)
+        if ($procs.Count -eq 0) { return }
+        foreach ($p in $procs) { [void]$p.CloseMainWindow() }
+        $deadline = [DateTime]::UtcNow.AddSeconds(3)
+        while ([DateTime]::UtcNow -lt $deadline) {
+            if (@(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue).Count -eq 0) { break }
+            Start-Sleep -Milliseconds 250
+        }
+        $left = @(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue)
+        foreach ($p in $left) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+        $deadline = [DateTime]::UtcNow.AddSeconds(2)
+        while ([DateTime]::UtcNow -lt $deadline) {
+            if (@(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue).Count -eq 0) { break }
+            Start-Sleep -Milliseconds 250
+        }
+        if (@(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue).Count -gt 0) {
+            Write-Host 'WARNING: could not close all Discord processes - the patcher may fail with errno 32.'
+        }
+        else {
+            Write-Host 'Discord closed.'
+        }
+    }
+
+    # Resolve the Discord client executable FROM THE INSTALL (the app-* dir is the truth
+    # for which exe this install runs), never from a hardcoded branch table. The updater
+    # launcher is never a client; a known branch is the last-resort fallback so a missing
+    # or renamed exe still resolves; otherwise the caller is told, it is not guessed.
+    function Get-DiscordExeName($t) {
+        $candidates = @(Get-ChildItem -LiteralPath $t.AppDir -Filter '*.exe' -File -ErrorAction SilentlyContinue)
+        foreach ($c in $candidates) {
+            if ($c.Name -eq 'updater_launcher.exe') { continue }
+            if ($c.Name -like 'Discord*.exe') { return $c.Name }
+        }
+        if ($branchFolders.ContainsKey($t.Branch)) { return ($branchFolders[$t.Branch] + '.exe') }
+        return $null
+    }
+
+    # Launch one install we just patched: through the install's own updater when present
+    # (Update.exe --processStart <exe>, the canonical branch-agnostic shortcut target),
+    # directly from the app dir otherwise. A launch failure is a WARNING, never fatal -
+    # it must not change the run's exit code. Returns $true when a launch was issued.
+    function Start-DiscordTarget($t) {
+        $exeName = Get-DiscordExeName $t
+        if (-not $exeName) {
+            Write-Host ('WARNING: could not find a Discord executable in {0} - not launched.' -f $t.AppDir)
+            return $false
+        }
+        try {
+            $updater = Join-Path $t.Path 'Update.exe'
+            if (Test-Path -LiteralPath $updater -PathType Leaf) {
+                Start-Process -FilePath $updater -ArgumentList ('--processStart "{0}"' -f $exeName) -WorkingDirectory $t.Path
+                Write-Host ('Launched {0}: "{1}" --processStart {2}' -f $t.Branch, $updater, $exeName)
+            }
+            else {
+                $exePath = Join-Path $t.AppDir $exeName
+                Start-Process -FilePath $exePath -WorkingDirectory $t.AppDir
+                Write-Host ('Launched {0}: "{1}"' -f $t.Branch, $exePath)
+            }
+            return $true
+        }
+        catch {
+            Write-Host ('WARNING: could not launch {0}: {1}' -f $t.Branch, $_.Exception.Message)
+            return $false
+        }
+    }
+
+    try {
+        # --- validate environment / parameters -----------------------------------
+        if ($env:OS -ne 'Windows_NT') {
+            Write-Host 'ERROR: This script supports Windows only.'
+            exit 2
+        }
+        if ($IncludeOpenAsar -and $ExcludeOpenAsar) {
+            Write-Host 'ERROR: -IncludeOpenAsar and -ExcludeOpenAsar are mutually exclusive.'
+            exit 2
+        }
+        if ($Branch -and $Location) {
+            Write-Host 'ERROR: -Branch and -Location are mutually exclusive.'
+            exit 2
+        }
+        $branchNorm = ''
+        if ($Branch) {
+            $branchNorm = $Branch.ToLowerInvariant()
+            if ($validBranches -notcontains $branchNorm) {
+                Write-Host ("ERROR: -Branch must be one of: stable | ptb | canary | development (got '{0}')" -f $Branch)
+                exit 2
+            }
+            if ($branchNorm -eq 'dev') { $branchNorm = 'development' }
+        }
+        # -ExcludeOpenAsar just restates the default (OpenAsar off unless -IncludeOpenAsar).
+        $wantOpenAsar = [bool]$IncludeOpenAsar
+
+        Write-Host 'vencord-setup.ps1 - Vencord Installer driver'
+        Write-Host ''
+        if ($DryRun) {
+            Write-Host 'Mode: DRY RUN (plan only - nothing will be downloaded, executed, or modified)'
+            Write-Host ''
+        }
+
+        # --- detect installs ------------------------------------------------------
+        $baseDir = $env:LOCALAPPDATA
+        if (-not $baseDir) {
+            Write-Host 'ERROR: %LOCALAPPDATA% is empty - cannot detect Discord installs.'
+            exit 2
+        }
+
+        $targets = @()
+        if ($Location) {
+            if (-not (Test-Path -LiteralPath $Location -PathType Container)) {
+                Write-Host ("ERROR: -Location '{0}' does not exist." -f $Location)
+                exit 2
+            }
+            $inst = Get-DiscordInstall -BasePath $Location -BranchName 'custom'
+            if ($null -eq $inst) {
+                Write-Host ("ERROR: '{0}' is not a valid Discord install (no app-* dir containing resources\app.asar)." -f $Location)
+                exit 2
+            }
+            $targets += $inst
+        }
+        else {
+            $scanList = @()
+            if ($branchNorm) { $scanList = @($branchNorm) } else { $scanList = @('stable', 'ptb', 'canary', 'development') }
+            foreach ($b in $scanList) {
+                $dir = Join-Path $baseDir $branchFolders[$b]
+                if (Test-Path -LiteralPath $dir -PathType Container) {
+                    $inst = Get-DiscordInstall -BasePath $dir -BranchName $b
+                    if ($null -ne $inst) { $targets += $inst }
+                }
+            }
+        }
+
+        if ($targets.Count -eq 0) {
+            Write-Host ("No Discord installs found under {0}." -f $baseDir)
+            if ($DryRun) {
+                Write-Host 'Nothing to do.'
+                return   # dry-run with nothing found: exit 0
+            }
+            Write-Host 'ERROR: none found. Install Discord first, then re-run this script.'
+            exit 2
+        }
+
+        Write-Host ("Detected {0} Discord install(s):" -f $targets.Count)
+        $i = 0
+        foreach ($t in $targets) {
+            $i++
+            $patchedTxt = 'N'
+            if ($t.Patched) { $patchedTxt = 'Y' }
+            Write-Host ("  [{0}] branch={1} patched={2} path={3}" -f $i, $t.Branch, $patchedTxt, $t.Path)
+        }
+        Write-Host ''
+
+        # --- Discord running check -------------------------------------------------
+        $procs = @(Get-Process -Name 'Discord*' -ErrorAction SilentlyContinue)
+        if ($procs.Count -gt 0) {
+            $names = (@($procs | Select-Object -ExpandProperty ProcessName -Unique) -join ', ')
+            if ($DryRun) {
+                Write-Host ("Discord running check: RUNNING ({0}) - the script will close it automatically before patching (graceful close, then force-kill)" -f $names)
+            }
+            else {
+                # Auto-close: graceful first, then force-kill leftovers.
+                Write-Host ("Closing Discord ({0}) to avoid file locks (errno 32)..." -f $names)
+                Close-DiscordProcesses
+            }
+        }
+        else {
+            Write-Host 'Discord running check: not running'
+        }
+        Write-Host ''
+
+        # --- per-install CLI arguments ---------------------------------------------
+        # Engine quirk (cli.go isValidBranch): --branch accepts only stable|ptb|canary|auto.
+        # 'development' is therefore targeted via --location instead of --branch.
+        $cliActions = @{}
+        foreach ($t in $targets) {
+            $action = @('--install')
+            if ($t.Patched) { $action = @('--repair') }
+            if ($branchNorm -and $branchNorm -ne 'development') {
+                $action += @('--branch', $branchNorm)
+            }
+            else {
+                $action += @('--location', $t.Path)
+            }
+            $cliActions[$t.Path] = $action
+        }
+
+        # --- dry run: print the exact plan and stop ---------------------------------
+        if ($DryRun) {
+            Write-Host 'Plan:'
+            $i = 0
+            foreach ($t in $targets) {
+                $i++
+                Write-Host ("  would run: {0}" -f (Format-CliCommand $cliPath $cliActions[$t.Path]))
+                if ($wantOpenAsar) {
+                    $oaArgs = @('--install-openasar')
+                    if ($branchNorm -and $branchNorm -ne 'development') {
+                        $oaArgs += @('--branch', $branchNorm)
+                    }
+                    else {
+                        $oaArgs += @('--location', $t.Path)
+                    }
+                    Write-Host ("  would run: {0}" -f (Format-CliCommand $cliPath $oaArgs))
+                }
+                if ($NoLaunch) {
+                    Write-Host '  Launch skipped (-NoLaunch)'
+                }
+                else {
+                    $exeName = Get-DiscordExeName $t
+                    if ($exeName) {
+                        $updater = Join-Path $t.Path 'Update.exe'
+                        if (Test-Path -LiteralPath $updater -PathType Leaf) {
+                            Write-Host ('  would launch: "{0}" --processStart {1}  (from {2})' -f $updater, $exeName, $t.Path)
+                        }
+                        else {
+                            Write-Host ('  would launch: "{0}"  (from {1})' -f (Join-Path $t.AppDir $exeName), $t.Path)
+                        }
+                    }
+                    else {
+                        Write-Host ('  WARNING: could not find a Discord executable in {0} - would not launch.' -f $t.AppDir)
+                    }
+                }
+            }
+            Write-Host ''
+            Write-Host 'Dry run complete - nothing was downloaded, executed, or modified.'
+            return   # exit 0
+        }
+
+        # --- download the CLI once ---------------------------------------------------
+        Write-Host ("Downloading VencordInstallerCli.exe to {0} ..." -f $cliPath)
+        $tls = [System.Net.ServicePointManager]::SecurityProtocol
+        [System.Net.ServicePointManager]::SecurityProtocol = ($tls -bor [System.Net.SecurityProtocolType]::Tls12)
+        Invoke-WebRequest -Uri $cliUrl -OutFile $cliPath -UseBasicParsing
+        if (-not (Test-Path -LiteralPath $cliPath -PathType Leaf)) {
+            throw 'Download failed: the installer executable was not written to the temp folder.'
+        }
+        if ((Get-Item -LiteralPath $cliPath).Length -le 0) {
+            throw 'Download failed: the installer executable is empty.'
+        }
+        $fs = [System.IO.File]::OpenRead($cliPath)
+        $b0 = $fs.ReadByte()
+        $b1 = $fs.ReadByte()
+        $fs.Close()
+        if ($b0 -ne 0x4D -or $b1 -ne 0x5A) {
+            throw 'Download failed: the downloaded file is not a valid Windows executable.'
+        }
+        Unblock-File -LiteralPath $cliPath -ErrorAction SilentlyContinue
+        Write-Host 'Download complete.'
+        Write-Host ''
+
+        # --- execute per install -------------------------------------------------------
+        $okCount = 0
+        $failures = @()
+        $i = 0
+        foreach ($t in $targets) {
+            $i++
+            Write-Host ("[{0}/{1}] {2} ({3})" -f $i, $targets.Count, $t.Branch, $t.Path)
+
+            $verb = 'install'
+            if ($t.Patched) { $verb = 'repair' }
+            $maxAttempts = 3   # initial run + up to 2 retries
+            $done = $false
+            for ($a = 1; $a -le $maxAttempts -and -not $done; $a++) {
+                if ($a -gt 1) {
+                    Write-Host ("  Retry {0}/{1} - closing Discord first..." -f ($a - 1), ($maxAttempts - 1))
+                    Close-DiscordProcesses
+                }
+                Write-Host ("  Running: {0}" -f (Format-CliCommand $cliPath $cliActions[$t.Path]))
+                $r = Invoke-Cli -ExePath $cliPath -ExeArgs $cliActions[$t.Path]
+                if ($r.ExitCode -ne 0) {
+                    # Retry only transient failures: files locked by a running Discord.
+                    # Network/rate-limit failures are deterministic - retrying is noise.
+                    $transient = (@($r.Output | Where-Object { $_ -match 'used by a different process|sharing violation' }).Count -gt 0)
+                    if (-not $transient -or $a -ge $maxAttempts) {
+                        Write-Host ("  FAILED: VencordInstallerCli.exe {0} exited with code {1}." -f $verb, $r.ExitCode)
+                        $failures += ("{0} ({1})" -f $t.Branch, $t.Path)
+                        break
+                    }
+                    continue
+                }
+                # Engine exited 0 - verify the patch actually landed on disk.
+                if (Test-PatchApplied $t) {
+                    Write-Host '  Verified: patch is on disk.'
+                    $okCount++
+                    $done = $true
+                }
+                elseif ($a -lt $maxAttempts) {
+                    Write-Host ("  Verify failed - retrying (up to {0} retries)..." -f ($maxAttempts - 1))
+                }
+                else {
+                    Write-Host '  FAILED: the engine reported success but the patch did not verify on disk.'
+                    $failures += ("{0} ({1})" -f $t.Branch, $t.Path)
+                }
+            }
+
+            if ($wantOpenAsar) {
+                $oaArgs = @('--install-openasar')
+                if ($branchNorm -and $branchNorm -ne 'development') {
+                    $oaArgs += @('--branch', $branchNorm)
+                }
+                else {
+                    $oaArgs += @('--location', $t.Path)
+                }
+                Write-Host ("  Running: {0}" -f (Format-CliCommand $cliPath $oaArgs))
+                $roa = Invoke-Cli -ExePath $cliPath -ExeArgs $oaArgs
+                $alreadyInstalled = $false
+                if ($roa.ExitCode -eq 1) {
+                    foreach ($ln in $roa.Output) {
+                        if ($ln -match 'OpenAsar already installed') { $alreadyInstalled = $true }
+                    }
+                }
+                if ($roa.ExitCode -eq 0) {
+                    Write-Host '  OpenAsar installed.'
+                }
+                elseif ($alreadyInstalled) {
+                    Write-Host '  OpenAsar is already installed on this install - nothing to do.'
+                }
+                else {
+                    Write-Host ("  FAILED: VencordInstallerCli.exe --install-openasar exited with code {0}." -f $roa.ExitCode)
+                    $failures += ("{0} ({1}) [openasar]" -f $t.Branch, $t.Path)
+                }
+            }
+            Write-Host ''
+        }
+
+        # --- summary ----------------------------------------------------------------------
+        Write-Host ("Done: {0} install(s) processed successfully, {1} failed." -f $okCount, $failures.Count)
+        if ($failures.Count -gt 0) {
+            foreach ($f in $failures) { Write-Host ("  failed: {0}" -f $f) }
+            Write-Host 'Close Discord if it is running, then re-run this script to retry.'
+            exit 1
+        }
+        Write-Host 'Vencord is set up.'
+        # Every install verified on disk (we only get here when nothing failed), so launch
+        # once per target. A launch failure is reported above and never changes this exit code.
+        if ($NoLaunch) {
+            Write-Host 'Launch skipped (-NoLaunch). Restart Discord to load it.'
+        }
+        else {
+            $launched = 0
+            foreach ($t in $targets) {
+                if ((Test-PatchApplied $t) -and (Start-DiscordTarget $t)) { $launched++ }
+            }
+            if ($launched -gt 0) {
+                Write-Host ("Launched {0} Discord install(s) - Discord is starting with Vencord loaded." -f $launched)
+            }
+            else {
+                Write-Host 'Restart Discord to load it.'
+            }
+        }
+    }
+    catch {
+        Write-Host ("ERROR: {0}" -f $_.Exception.Message)
+        exit 1
+    }
+}
+
+# Auto-run for the iex one-liner (no arguments) AND for scriptblock invocation with
+# arguments. Set VENCORD_SETUP_IMPORTED=1 to dot-import the function without running.
+if (-not $env:VENCORD_SETUP_IMPORTED) {
+    Invoke-VencordSetup @PSBoundParameters
+}
