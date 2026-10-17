@@ -20,10 +20,10 @@
     suppresses the launch entirely, and a dry run or a failed run never launches.
 
 .USAGE - one-liner (runs with zero parameters: auto-detect, install/repair Vencord, no OpenAsar):
-    iex (irm 'https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1')
+    iex (irm 'https://raw.githubusercontent.com/nathwn12/Installer2/main/vencord-setup.ps1')
 
 .USAGE - parameterized form (dry-run / OpenAsar opt-in):
-    & ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1'))) -DryRun -IncludeOpenAsar
+    & ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/nathwn12/Installer2/main/vencord-setup.ps1'))) -DryRun -IncludeOpenAsar
 
 .PARAMETERS
     -DryRun           Print the plan (installs, patched state, exact CLI commands) and touch nothing.
