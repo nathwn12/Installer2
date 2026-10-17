@@ -1,3 +1,7 @@
+> **Fork of [Vencord/Installer](https://github.com/Vencord/Installer).** Adds a one-line PowerShell setup script plus installer fixes, and tracks upstream via automated sync.
+>
+> Upstream's README follows unchanged.
+
 # Vencord Installer
 
 The Vencord Installer allows you to install [Vencord, the cutest Discord Desktop client mod](https://github.com/Vendicated/Vencord)
