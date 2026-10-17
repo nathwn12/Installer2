@@ -1,43 +1,61 @@
-# Vencord Setup
+# Installer2
 
-One line. Your Discord is detected automatically — Vencord gets installed or repaired. Done.
+**Install or repair Vencord on your Discord installs with one line.**
 
-> Windows + PowerShell 5.1+ · no admin needed · you don't even need to close Discord — the script closes it for you.
+Unofficial, personal-use driver. All credit to the original authors: [Vencord](https://github.com/Vendicated/Vencord) by Vendicated and contributors, and the [Vencord Installer](https://github.com/Vencord/Installer) engine it downloads at run time.
 
-## Install (Vencord only)
-
-```powershell
-iex (irm 'https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1')
-```
-
-## Install (Vencord + OpenAsar)
+## Install
 
 ```powershell
-& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/nathwn12/Installer2/feat/vencord-main/vencord-setup.ps1'))) -IncludeOpenAsar
+iex (irm 'https://raw.githubusercontent.com/nathwn12/Installer2/main/vencord-setup.ps1')
 ```
 
-Optional preview without touching anything — add `-DryRun` to the second form.
+You need Discord already installed on Windows with PowerShell 5.1 or newer. The first run detects your installs, downloads the official engine once, installs or repairs Vencord, then launches Discord.
+
+To include OpenAsar on each install:
+
+```powershell
+& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/nathwn12/Installer2/main/vencord-setup.ps1'))) -IncludeOpenAsar
+```
+
+To preview the plan without changing anything, add `-DryRun` to the second form.
+
+### Or let your AI install it
+
+```text
+Install nathwn12/Installer2 with iex (irm 'https://raw.githubusercontent.com/nathwn12/Installer2/main/vencord-setup.ps1'), then prove it works.
+1. Run: iex (irm 'https://raw.githubusercontent.com/nathwn12/Installer2/main/vencord-setup.ps1')
+2. First run: it detects Discord, downloads the official engine, installs or repairs Vencord.
+3. Done when: the -DryRun second form exits 0 and prints Dry run complete - nothing was downloaded, executed, or modified.
+If it fails, stop and paste the full output; do not improvise a fix.
+```
+
+## Use it
+
+Run the second Install form with the flags you want. Add `-IncludeOpenAsar` to also install OpenAsar, `-Branch` to target one branch only (stable, ptb, canary, or development), `-Location` to target one install folder only, or `-NoLaunch` to skip the automatic launch after success. Add `-DryRun` any time to print the plan without downloading or changing anything.
 
 ## What you get
 
-- ✅ **One line, zero clicks** — paste, Enter, done. That's the whole install.
-- ✅ **Auto-detect** — finds your Discord (stable / PTB / Canary / Development) under `%LOCALAPPDATA%` and points itself at it.
-- ✅ **Auto install *or* repair** — already patched? It repairs. Fresh? It installs. No menus, no prompts.
-- ✅ **Discord open? Doesn't matter** — the script closes it for you (gracefully; force-kill only as a fallback).
-- ✅ **Always current** — pulls the official Vencord build at run time, so it never goes stale.
-- ✅ **OpenAsar opt-in** — off by default; one flag to include, one to exclude.
-- ✅ **Safe to re-run** — idempotent: run it again anytime to repair or refresh.
+- Automatic detection of your Discord installs across stable, PTB, Canary, and Development.
+- Install-or-repair behavior: a fresh install gets Vencord, an already patched install gets repaired.
+- Automatic Discord close before patching, so a file lock never blocks the run.
+- Always current engine: every run pulls the officially released executable at run time.
+- OpenAsar as an opt-in on each install, off unless you ask for it.
+- Safe re-runs: run it again any time to repair or refresh.
+- Automatic launch of each install you just set up after a successful run.
 
-Powered by the official **Vencord Installer** engine — this script just drives it so you don't have to think.
+## Requirements
 
----
+- Windows.
+- PowerShell 5.1 or newer, including current PowerShell.
+- Discord already installed.
+- Network access to GitHub for the script and the engine download.
+- No admin rights needed.
 
-## Credits & license — all credit to the original owners
+## Links
 
-**This fork takes no credit and makes no money. It exists purely for personal use.**
-
-- **Vencord** — by **Vendicated** and contributors: <https://github.com/Vendicated/Vencord>
-- **Vencord Installer** — the engine this script drives, by **Vendicated** and contributors: <https://github.com/Vencord/Installer>
-- Vencord, its installer, and this fork are licensed under the **GNU GPL v3** — see [LICENSE](LICENSE).
-
-All rights, credit, and ownership belong to the original authors. This repository is a personal-use fork: no affiliation, no endorsement, no monetary gain, nothing sold or charged. Everything of value here is theirs — the only addition is one convenience script.
+- Upstream Vencord: https://github.com/Vendicated/Vencord
+- Upstream Installer: https://github.com/Vencord/Installer
+- Upstream releases, the engine this script downloads at run time: https://github.com/Vencord/Installer/releases
+- This repo: https://github.com/nathwn12/Installer2
+- License: GPLv3, see [LICENSE](LICENSE)
