@@ -20,16 +20,6 @@ To include OpenAsar on each install:
 
 To preview the plan without changing anything, add `-DryRun` to the second form.
 
-### Or let your AI install it
-
-```text
-Install nathwn12/Installer2 with iex (irm 'https://raw.githubusercontent.com/nathwn12/Installer2/main/vencord-setup.ps1'), then prove it works.
-1. Run: iex (irm 'https://raw.githubusercontent.com/nathwn12/Installer2/main/vencord-setup.ps1')
-2. First run: it detects Discord, downloads the official engine, installs or repairs Vencord.
-3. Done when: the -DryRun second form exits 0 and prints Dry run complete - nothing was downloaded, executed, or modified.
-If it fails, stop and paste the full output; do not improvise a fix.
-```
-
 ## Use it
 
 Run the second Install form with the flags you want. Add `-IncludeOpenAsar` to also install OpenAsar, `-Branch` to target one branch only (stable, ptb, canary, or development), `-Location` to target one install folder only, or `-NoLaunch` to skip the automatic launch after success. Add `-DryRun` any time to print the plan without downloading or changing anything.
