@@ -1,6 +1,5 @@
-# Installer2
-
-**Install or repair Vencord on your Discord installs with one line.**
+<h1 align="center">Installer2</h1>
+<p align="center"><strong>Install or repair Vencord on your Discord installs with one line.</strong></p>
 
 Unofficial, personal-use driver. All credit to the original authors: [Vencord](https://github.com/Vendicated/Vencord) by Vendicated and contributors, and the [Vencord Installer](https://github.com/Vencord/Installer) engine it downloads at run time.
 
