@@ -22,7 +22,7 @@ To preview the plan without changing anything, add `-DryRun` to the second form.
 
 ## Use it
 
-Run the second Install form with the flags you want. Add `-IncludeOpenAsar` to also install OpenAsar, `-Branch` to target one branch only (stable, ptb, canary, or development), `-Location` to target one install folder only, or `-NoLaunch` to skip the automatic launch after success. Add `-DryRun` any time to print the plan without downloading or changing anything.
+Run the second Install form with the flags you want. Add `-IncludeOpenAsar` to also install OpenAsar, `-Branch` to target one branch only (stable, ptb, canary, development, or dev as an alias for development), `-Location` to target one install folder only, or `-NoLaunch` to skip the automatic launch after success. Add `-DryRun` any time to print the plan without downloading or changing anything.
 
 ## What you get
 
@@ -33,6 +33,23 @@ Run the second Install form with the flags you want. Add `-IncludeOpenAsar` to a
 - OpenAsar as an opt-in on each install, off unless you ask for it.
 - Safe re-runs: run it again any time to repair or refresh.
 - Automatic launch of each install you just set up after a successful run.
+
+## Commands
+
+Run the second Install form with the flags you want. Each flag below shows its default.
+
+- `-DryRun` — print the plan without downloading or changing anything. Default off.
+- `-IncludeOpenAsar` — also install OpenAsar on each install. Default off.
+- `-ExcludeOpenAsar` — leave OpenAsar out. This is the default behavior, so the switch is a no-op kept for compatibility. You cannot combine it with `-IncludeOpenAsar`.
+- `-Branch` — target one branch only: stable, ptb, canary, development, or dev as an alias for development. Default is all detected installs. You cannot combine it with `-Location`.
+- `-Location` — target one install folder only. Default is all detected installs.
+- `-NoLaunch` — skip the automatic launch after a successful run. Default is to launch each install you just set up.
+
+Exit codes:
+
+- `0` — success, including a dry run even when no installs are found.
+- `1` — install failure, such as the engine failing or the download failing.
+- `2` — usage or detection error, such as conflicting flags, an unknown branch, or no Discord installs found.
 
 ## Requirements
 
